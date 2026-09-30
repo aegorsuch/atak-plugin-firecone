@@ -1,0 +1,10 @@
+.gradle/
+.idea/
+build/
+app/build/
+app/proguard-gradle-repackage.txt
+local.properties
+signing.properties
+.takdev/
+commit.json
+*.apk

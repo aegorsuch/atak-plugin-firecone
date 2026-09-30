@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App -->
+    <string name="app_name">Firecone</string>
+    <!-- description -->
+    <string name="app_desc">Direction-of-travel cones for ATAK teammates</string>
+    <string name="cone_description">Show friendly teammates’ travel direction from standard ATAK reports; no plugin is needed on their devices. Moving cones are orange; the last observed travel direction remains grey when they stop. Stale contacts and teammates without an observed course have no cone. This does not show phone orientation.</string>
+    <string name="cone_show">Show teammate cones</string>
+    <string name="cone_hide">Hide teammate cones</string>
+    <string name="cone_stopped">Teammate cones hidden</string>
+    <string name="cone_active">Showing %1$d moving and %2$d last-direction cones</string>
+    <string name="cone_no_map">ATAK map is unavailable. Try again after the map loads.</string>
+
+
+
+
+</resources>
