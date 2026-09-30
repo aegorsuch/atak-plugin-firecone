@@ -21,7 +21,7 @@ import java.util.UUID;
 
 final class FireconeOverlay implements PointMapItem.OnPointChangedListener,
         Marker.OnTrackChangedListener, MapItem.OnVisibleChangedListener,
-        MapItem.OnMetadataChangedListener,
+        MapItem.OnMetadataChangedListener, Marker.OnIconChangedListener,
         MapEventDispatcher.MapEventDispatchListener {
 
     interface StatusListener {
@@ -31,8 +31,6 @@ final class FireconeOverlay implements PointMapItem.OnPointChangedListener,
     private static final double MIN_SPEED_METERS_PER_SECOND = 0.5;
     private static final float CONE_WIDTH_DEGREES = 60f;
     private static final float CONE_RANGE_METERS = 500f;
-    private static final int MOVING_FILL = Color.argb(75, 255, 110, 0);
-    private static final int MOVING_STROKE = Color.rgb(255, 145, 40);
     private static final int STOPPED_FILL = Color.argb(60, 140, 140, 140);
     private static final int STOPPED_STROKE = Color.rgb(160, 160, 160);
 
@@ -78,8 +76,10 @@ final class FireconeOverlay implements PointMapItem.OnPointChangedListener,
             marker.removeOnPointChangedListener(this);
             marker.removeOnTrackChangedListener(this);
             marker.removeOnVisibleChangedListener(this);
+            marker.removeOnIconChangedListener(this);
             marker.removeOnMetadataChangedListener("stale", this);
             marker.removeOnMetadataChangedListener("forceStale", this);
+            marker.removeOnMetadataChangedListener("teamColor", this);
             entry.getValue().removeFromGroup();
         }
         cones.clear();
@@ -122,6 +122,11 @@ final class FireconeOverlay implements PointMapItem.OnPointChangedListener,
         main.post(() -> update((Marker) item));
     }
 
+    @Override
+    public void onIconChanged(Marker marker) {
+        main.post(() -> update(marker));
+    }
+
     private void watch(MapItem item) {
         if (!(item instanceof Marker) || item == map.getSelfMarker()
                 || item.getType() == null || !item.getType().startsWith("a-f"))
@@ -131,16 +136,16 @@ final class FireconeOverlay implements PointMapItem.OnPointChangedListener,
             return;
         SensorFOV cone = new SensorFOV(UUID.randomUUID().toString());
         cone.setTitle(context.getString(R.string.app_name));
-        cone.setFillColor(MOVING_FILL);
-        cone.setStrokeColor(MOVING_STROKE);
         cone.setVisible(false);
         cones.put(marker, cone);
         map.getRootGroup().addItem(cone);
         marker.addOnPointChangedListener(this);
         marker.addOnTrackChangedListener(this);
         marker.addOnVisibleChangedListener(this);
+        marker.addOnIconChangedListener(this);
         marker.addOnMetadataChangedListener("stale", this);
         marker.addOnMetadataChangedListener("forceStale", this);
+        marker.addOnMetadataChangedListener("teamColor", this);
         update(marker);
     }
 
@@ -151,8 +156,10 @@ final class FireconeOverlay implements PointMapItem.OnPointChangedListener,
         marker.removeOnPointChangedListener(this);
         marker.removeOnTrackChangedListener(this);
         marker.removeOnVisibleChangedListener(this);
+        marker.removeOnIconChangedListener(this);
         marker.removeOnMetadataChangedListener("stale", this);
         marker.removeOnMetadataChangedListener("forceStale", this);
+        marker.removeOnMetadataChangedListener("teamColor", this);
         cone.removeFromGroup();
         lastMovingHeadings.remove(marker);
         updateStatus();
@@ -179,8 +186,11 @@ final class FireconeOverlay implements PointMapItem.OnPointChangedListener,
             if (lastHeading == null) {
                 cone.setVisible(false);
             } else {
-                cone.setFillColor(moving ? MOVING_FILL : STOPPED_FILL);
-                cone.setStrokeColor(moving ? MOVING_STROKE : STOPPED_STROKE);
+                int color = marker.getMetaInteger("teamColor", marker.getIconColor());
+                cone.setFillColor(moving
+                        ? Color.argb(75, Color.red(color), Color.green(color), Color.blue(color))
+                        : STOPPED_FILL);
+                cone.setStrokeColor(moving ? color | Color.BLACK : STOPPED_STROKE);
                 cone.setPoint(position);
                 cone.setMetrics(lastHeading, CONE_WIDTH_DEGREES, CONE_RANGE_METERS);
                 cone.setVisible(true);

@@ -1,6 +1,6 @@
 # Firecone
 
-Firecone is an ATAK 5.6.0 plugin that draws cones on friendly teammate markers from their normal ATAK position and course-over-ground reports. Teammates do not need the plugin. These cones indicate **direction of travel, not the direction their phones point**; normal CoT does not transmit device orientation. Moving teammates have orange cones; when they stop, the last observed travel heading stays grey until ATAK marks the contact stale. Teammates without an observed moving course do not get a cone.
+Firecone is an ATAK 5.6.0 plugin that draws cones on friendly teammate markers from their normal ATAK position and course-over-ground reports. Teammates do not need the plugin. These cones indicate **direction of travel, not the direction their phones point**; normal CoT does not transmit device orientation. Moving cones match their teammate marker color; when teammates stop, the last observed travel heading stays grey until ATAK marks the contact stale. Teammates without an observed moving course do not get a cone.
 
 Open the Firecone toolbar pane and tap **Show teammate cones** to turn them on. Cones have a fixed 60-degree width and 500-meter range, and follow teammate position and course updates. Tap **Hide teammate cones** to turn them off; they are also removed when the plugin stops. No additional CoT messages are sent.
 
