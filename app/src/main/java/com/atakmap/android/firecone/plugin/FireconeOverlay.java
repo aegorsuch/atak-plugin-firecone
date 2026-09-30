@@ -49,12 +49,16 @@ final class FireconeOverlay implements PointMapItem.OnPointChangedListener,
         statusListener = listener;
     }
 
-    void start() {
+    boolean isRunning() {
+        return map != null;
+    }
+
+    boolean start() {
         if (map == null) {
             map = MapView.getMapView();
             if (map == null) {
                 status(context.getString(R.string.cone_no_map));
-                return;
+                return false;
             }
             map.getMapEventDispatcher().addMapEventListener(MapEvent.ITEM_ADDED, this);
             map.getMapEventDispatcher().addMapEventListener(MapEvent.ITEM_REMOVED, this);
@@ -64,6 +68,7 @@ final class FireconeOverlay implements PointMapItem.OnPointChangedListener,
         for (Marker marker : cones.keySet())
             update(marker);
         updateStatus();
+        return true;
     }
 
     void stop() {

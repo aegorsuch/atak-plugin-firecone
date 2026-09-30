@@ -18,17 +18,12 @@
             android:layout_height="wrap_content"
             android:text="@string/cone_description" />
 
-        <Button
-            android:id="@+id/show_cone"
+        <Switch
+            android:id="@+id/cone_toggle"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/cone_show" />
-
-        <Button
-            android:id="@+id/hide_cone"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/cone_hide" />
+            android:checked="false"
+            android:text="@string/cone_toggle" />
 
         <TextView
             android:id="@+id/cone_status"

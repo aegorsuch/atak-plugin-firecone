@@ -5,7 +5,7 @@ import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.View;
-import android.widget.Button;
+import android.widget.Switch;
 import android.widget.TextView;
 
 import com.atak.plugins.impl.PluginContextProvider;
@@ -28,6 +28,7 @@ public class FireconePlugin implements IPlugin {
     ToolbarItem toolbarItem;
     Pane conePane;
     FireconeOverlay overlay;
+    Switch coneToggle;
 
     public FireconePlugin(IServiceController serviceController) {
         this.serviceController = serviceController;
@@ -73,7 +74,11 @@ public class FireconePlugin implements IPlugin {
 
     @Override
     public void onStop() {
-        new Handler(Looper.getMainLooper()).post(() -> overlay.stop());
+        new Handler(Looper.getMainLooper()).post(() -> {
+            overlay.stop();
+            if (coneToggle != null)
+                coneToggle.setChecked(false);
+        });
         if (uiService != null)
             uiService.removeToolbarItem(toolbarItem);
     }
@@ -82,11 +87,16 @@ public class FireconePlugin implements IPlugin {
         if (conePane == null) {
             View view = PluginLayoutInflater.inflate(pluginContext, R.layout.main_layout, null);
             TextView status = view.findViewById(R.id.cone_status);
-            Button show = view.findViewById(R.id.show_cone);
-            Button hide = view.findViewById(R.id.hide_cone);
+            coneToggle = view.findViewById(R.id.cone_toggle);
             overlay.setStatusListener(status::setText);
-            show.setOnClickListener(v -> overlay.start());
-            hide.setOnClickListener(v -> overlay.stop());
+            coneToggle.setOnCheckedChangeListener((button, checked) -> {
+                if (checked) {
+                    if (!overlay.start())
+                        button.setChecked(false);
+                } else if (overlay.isRunning()) {
+                    overlay.stop();
+                }
+            });
 
             conePane = new PaneBuilder(view)
                     .setMetaValue(Pane.RELATIVE_LOCATION, Pane.Location.Default)
@@ -95,6 +105,7 @@ public class FireconePlugin implements IPlugin {
                     .build();
         }
 
+        coneToggle.setChecked(overlay.isRunning());
         if (!uiService.isPaneVisible(conePane)) {
             uiService.showPane(conePane, null);
         }
