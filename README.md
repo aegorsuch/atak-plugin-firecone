@@ -4,7 +4,7 @@ Firecone is an ATAK 5.6.0 plugin that draws cones on friendly teammate markers f
 
 Open the Firecone toolbar pane and switch **Teammate cones** on or off. Cones have a fixed 60-degree width and 500-meter range, and follow teammate position and course updates. They are removed when switched off or when the plugin stops. No additional CoT messages are sent.
 
-The Android package and plugin extension use `com.atakmap.android.firecone.plugin`, independent of Houndmaster. Configure a local ATAK SDK in `local.properties` to build, for example with `.\gradlew.bat :app:assembleCivDebug`.
+The Android package and plugin extension use `com.atakmap.android.firecone.plugin`. Configure a local ATAK SDK in `local.properties` to build, for example with `.\gradlew.bat :app:assembleCivDebug`.
 
 ## Rights
 
