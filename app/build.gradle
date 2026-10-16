@@ -100,6 +100,9 @@ def supportedFlavors =
     [ name : 'gov'],
 ]
 
+def revision = getVersionName() ?: 'dev'
+def apkRevision = revision ==~ /[0-9a-fA-F]{7,}/ ? revision.substring(0, 7) : revision
+
 android {
     compileSdk 36
     namespace 'com.atakmap.android.firecone.plugin'
@@ -200,6 +203,10 @@ android {
          applicationVariants.all { variant ->
              variant.resValue "string", "versionName", variant.versionName
              buildConfigField 'String', 'ATAK_PACKAGE_NAME', '"com.atakmap.app.civ"'
+             variant.outputs.all { output ->
+                 def suffix = variant.flavorName == 'civ' ? '' : "-${variant.flavorName}"
+                 output.outputFileName = "ATAK-Plugin-Firecone-${ATAK_VERSION}-${apkRevision}${suffix}.apk"
+             }
         }
     }
 
@@ -218,8 +225,7 @@ android {
 
             // It is strongly encouraged that plugin developers do not modify the archiveBaseName, version code logic and version 
             // name logic to provide for consistency within the community.   
-            def revision = getVersionName() ?: 'dev'
-            setProperty("archivesBaseName", "ATAK-Plugin-" + rootProject.name + "-" + PLUGIN_VERSION + "-" + revision + "-" + ATAK_VERSION)
+            setProperty("archivesBaseName", "ATAK-Plugin-Firecone-" + ATAK_VERSION + "-" + apkRevision)
             defaultConfig.versionCode = getVersionCode()
             defaultConfig.versionName = PLUGIN_VERSION + " (" + revision + ") - [" + ATAK_VERSION + "]"
         }

@@ -1,10 +1,10 @@
 # Firecone
 
-Firecone is an ATAK 5.6.0 plugin that draws cones on friendly teammate markers from their normal ATAK position and course-over-ground reports. Teammates do not need the plugin. These cones indicate **direction of travel, not the direction their phones point**; normal CoT does not transmit device orientation. Moving cones match their teammate marker color; when teammates stop, the last observed travel heading stays grey until ATAK marks the contact stale. Teammates without an observed moving course do not get a cone.
+Firecone is an ATAK 5.6.0 plugin that draws cones on friendly teammate markers from their normal ATAK position and course-over-ground reports. Teammates do not need the plugin. These cones indicate **direction of travel, not the direction their phones point**; normal CoT does not transmit device orientation. Moving cones match their teammate marker color; when teammates stop, the last observed travel heading stays grey until 30 seconds after the last moving report. Cones disappear after that timeout without a new moving report, or when ATAK marks the contact stale. Teammates without an observed moving course do not get a cone.
 
-Open the Firecone toolbar pane and switch **Teammate cones** on or off. Cones have a fixed 60-degree width and 500-meter range, and follow teammate position and course updates. They are removed when switched off or when the plugin stops. No additional CoT messages are sent.
+Open the Firecone toolbar pane and switch **Teammate cones** on or off. Cones have a fixed 60-degree width, 50-meter range, and 30-second heading timeout. Cones follow teammate position and course updates and are removed when switched off or when the plugin stops. No additional CoT messages are sent.
 
-The Android package and plugin extension use `com.atakmap.android.firecone.plugin`. Configure a local ATAK SDK in `local.properties` to build, for example with `.\gradlew.bat :app:assembleCivDebug`.
+The Android package and plugin extension use `com.atakmap.android.firecone.plugin`. Configure a local ATAK SDK in `local.properties` to build, for example with `.\gradlew.bat :app:assembleCivDebug`. The CIV APK is named `ATAK-Plugin-Firecone-<ATAK-version>-<revision>.apk` (for example, `ATAK-Plugin-Firecone-5.6.0-490c86a.apk`).
 
 ## Rights
 
