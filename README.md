@@ -21,7 +21,7 @@ The [TAK Forge repository](https://git.tak.gov/aegorsuch/atak-plugin-firecone#) 
 ## TAK Forge CI/CD
 
 `.gitlab-ci.yml` uses the shared `devsecops/gitlab-ci-common` build-and-sign
-template, matching Houndmaster. Pushes to `develop` run `release_build_and_sign`
+template, matching Houndmaster. Pushes to `main` run `release_build_and_sign`
 with JDK 17 for the `civ` variant. Other branches do not run this build job.
 Firecone continues to target ATAK 5.6.0.
 
@@ -38,5 +38,5 @@ can provide a root-level, untracked `signing.properties` with `storeFile`,
 from `app`. Without that file, the existing local signing defaults are preserved.
 
 The shared template controls publication and distribution separately from the
-build; a successful develop build is not production approval. This pipeline
+build; a successful main build is not production approval. This pipeline
 runs on canonical TAK Forge only and does not update the GitHub backup.
