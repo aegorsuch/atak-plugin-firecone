@@ -9,7 +9,7 @@ release_build_and_sign:
   variables:
     variants: "civ"
   rules:
-    - if: '$CI_COMMIT_BRANCH == "develop"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
 
 test_github_release_publisher:
   stage: build
@@ -19,7 +19,7 @@ test_github_release_publisher:
   script:
     - python3 -m unittest discover -s scripts -p "test_*.py"
   rules:
-    - if: '$CI_COMMIT_BRANCH == "develop" && $CI_COMMIT_REF_PROTECTED == "true"'
+    - if: '$CI_COMMIT_BRANCH == "main" && $CI_COMMIT_REF_PROTECTED == "true"'
 
 publish_github_latest_release:
   stage: .post
@@ -35,4 +35,4 @@ publish_github_latest_release:
   script:
     - python3 scripts/publish_github_release.py
   rules:
-    - if: '$CI_COMMIT_BRANCH == "develop" && $CI_COMMIT_REF_PROTECTED == "true"'
+    - if: '$CI_COMMIT_BRANCH == "main" && $CI_COMMIT_REF_PROTECTED == "true"'

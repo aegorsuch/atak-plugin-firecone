@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Publish the signed CIV APK from the current protected develop commit."""
+"""Publish the signed CIV APK from the current protected main commit."""
 
 from __future__ import annotations
 
@@ -105,22 +105,22 @@ def _github_json(
 def _latest_develop_commit() -> str:
     try:
         result = subprocess.run(
-            ["git", "ls-remote", "--heads", "origin", "refs/heads/develop"],
+            ["git", "ls-remote", "--heads", "origin", "refs/heads/main"],
             check=False,
             capture_output=True,
             text=True,
         )
     except OSError as error:
-        raise PublishError("Unable to check the canonical develop branch head.") from error
+        raise PublishError("Unable to check the canonical main branch head.") from error
     if result.returncode != 0:
-        raise PublishError("Unable to check the canonical develop branch head.")
+        raise PublishError("Unable to check the canonical main branch head.")
     refs = [
         line.split()[0]
         for line in result.stdout.splitlines()
-        if len(line.split()) == 2 and line.split()[1] == "refs/heads/develop"
+        if len(line.split()) == 2 and line.split()[1] == "refs/heads/main"
     ]
     if len(refs) != 1:
-        raise PublishError("Git did not return exactly one canonical develop branch head.")
+        raise PublishError("Git did not return exactly one canonical main branch head.")
     return refs[0]
 
 
@@ -201,8 +201,8 @@ def publish(
 ) -> bool:
     if env.get("CI_PROJECT_PATH") != REPOSITORY:
         raise PublishError("This publisher only supports the canonical Firecone project.")
-    if env.get("CI_COMMIT_BRANCH") != "develop":
-        raise PublishError("This publisher only supports the develop branch.")
+    if env.get("CI_COMMIT_BRANCH") != "main":
+        raise PublishError("This publisher only supports the main branch.")
     for key in (
         "CI_COMMIT_SHA",
         "CI_COMMIT_SHORT_SHA",
@@ -217,7 +217,7 @@ def publish(
     if _latest_develop_commit() != env["CI_COMMIT_SHA"]:
         print(
             f"Skipping stale pipeline {env['CI_PIPELINE_ID']}; "
-            "the develop branch has advanced."
+            "the main branch has advanced."
         )
         return False
 
@@ -247,7 +247,7 @@ def publish(
                 "target_commitish": env["CI_COMMIT_SHA"],
                 "name": RELEASE_TITLE,
                 "body": "Rolling signed CIV APK from the newest successful protected "
-                "TAK.gov develop pipeline.",
+                "TAK.gov main pipeline.",
                 "draft": True,
                 "prerelease": False,
             },

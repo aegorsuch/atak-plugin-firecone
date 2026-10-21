@@ -147,7 +147,7 @@ class FakeGitHub:
 def environment(**updates):
     env = {
         "CI_PROJECT_PATH": "aegorsuch/atak-plugin-firecone",
-        "CI_COMMIT_BRANCH": "develop",
+        "CI_COMMIT_BRANCH": "main",
         "CI_COMMIT_SHA": "a" * 40,
         "CI_COMMIT_SHORT_SHA": "aaaaaaa",
         "CI_PIPELINE_ID": "42",
@@ -176,7 +176,7 @@ class PublishReleaseTests(unittest.TestCase):
     def fake_commands(args, **_):
         if args[0] == "git":
             return SimpleNamespace(
-                returncode=0, stdout=f"{'a' * 40}\trefs/heads/develop\n"
+                returncode=0, stdout=f"{'a' * 40}\trefs/heads/main\n"
             )
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
@@ -259,7 +259,7 @@ class PublishReleaseTests(unittest.TestCase):
         def unsigned_command(args, **_):
             if args[0] == "git":
                 return SimpleNamespace(
-                    returncode=0, stdout=f"{'a' * 40}\trefs/heads/develop\n"
+                    returncode=0, stdout=f"{'a' * 40}\trefs/heads/main\n"
                 )
             return SimpleNamespace(returncode=1, stdout="", stderr="")
 
@@ -275,7 +275,7 @@ class PublishReleaseTests(unittest.TestCase):
         def stale_commands(args, **_):
             if args[0] == "git":
                 return SimpleNamespace(
-                    returncode=0, stdout=f"{'b' * 40}\trefs/heads/develop\n"
+                    returncode=0, stdout=f"{'b' * 40}\trefs/heads/main\n"
                 )
             self.fail("The APK signer must not run for a stale pipeline.")
 
