@@ -10,3 +10,29 @@ release_build_and_sign:
     variants: "civ"
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
+
+test_github_release_publisher:
+  stage: build
+  image:
+    name: ${TAK_REGISTRY_HOST}/devsecops/gradle-build-launcher:17-${GRADLE_BUILD_LAUNCHER_TAG}
+    entrypoint: [""]
+  script:
+    - python3 -m unittest discover -s scripts -p "test_*.py"
+  rules:
+    - if: '$CI_SERVER_HOST == "git.tak.gov" && $CI_PROJECT_PATH == "aegorsuch/atak-plugin-firecone" && $CI_COMMIT_BRANCH == "main" && $CI_COMMIT_REF_PROTECTED == "true"'
+
+publish_github_pipeline_release:
+  stage: .post
+  image:
+    name: ${TAK_REGISTRY_HOST}/devsecops/gradle-build-launcher:17-${GRADLE_BUILD_LAUNCHER_TAG}
+    entrypoint: [""]
+  needs:
+    - job: release_build_and_sign
+      artifacts: true
+    - job: test_github_release_publisher
+      artifacts: false
+  resource_group: firecone-github-rolling-release
+  script:
+    - python3 scripts/publish_github_release.py
+  rules:
+    - if: '$CI_SERVER_HOST == "git.tak.gov" && $CI_PROJECT_PATH == "aegorsuch/atak-plugin-firecone" && $CI_COMMIT_BRANCH == "main" && $CI_COMMIT_REF_PROTECTED == "true"'

@@ -8,3 +8,4 @@ signing.properties
 .takdev/
 commit.json
 *.apk
+__pycache__/
