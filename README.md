@@ -39,4 +39,30 @@ from `app`. Without that file, the existing local signing defaults are preserved
 
 The shared template controls publication and distribution separately from the
 build; a successful main build is not production approval. This pipeline
-runs on canonical TAK Forge only and does not update the GitHub backup.
+runs on canonical TAK Forge only. The separate publisher below updates the
+GitHub backup after a successful protected `main` build.
+
+## Rolling GitHub release
+
+The protected `main` pipeline publishes only its signed CIV APK to the
+public GitHub backup as the stable release **TAK Forge Automated Pipeline**
+(`pipeline-latest`) with the asset `ATAK-Plugin-Firecone-latest.apk`. The
+publisher verifies the APK signature and the uploaded asset digest, serializes
+updates, and skips an outdated pipeline. It does not change numbered releases
+or unrelated release assets.
+
+Before enabling this publisher, configure a `GITHUB_RELEASE_TOKEN` CI/CD
+variable in the canonical TAK Forge project. Use a fine-grained token limited
+to this GitHub repository with **Contents: read and write** permission; mark
+the variable **protected** and **masked**, with environment scope `*`, and
+ensure `main` is protected. The token is read only from this CI variable;
+the job fails clearly if it is missing. Do not use a personal/local `gh` or
+`glab` token, and do not put credentials in the repository. The publisher also
+checks the canonical `main` branch head through the pipeline checkout and
+skips outdated commits without requiring another CI credential. The
+`publish_github_pipeline_release` job runs only on the canonical Forge host and
+project, after both the signed build and the offline publisher tests succeed.
+It downloads the signed build's artifacts without rebuilding or resigning
+them. Its existing launcher image must provide Python 3.10+, Git, and Android
+`apksigner`. The publisher script's mocked tests can be run offline with
+`python -m unittest discover -s scripts -p "test_*.py"`.
