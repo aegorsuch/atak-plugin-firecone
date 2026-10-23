@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -127,12 +128,38 @@ def _latest_develop_commit() -> str:
     return refs[0]
 
 
+def _android_tool(name: str) -> str:
+    executable = shutil.which(name)
+    if executable:
+        return executable
+    for key in ("ANDROID_SDK_ROOT", "ANDROID_HOME"):
+        root = os.environ.get(key)
+        if not root:
+            continue
+        tools = Path(root) / "build-tools"
+        candidates = []
+        suffix = ""
+        if os.name == "nt":
+            suffix = ".bat" if name == "apksigner" else ".exe"
+        for directory in tools.glob("*"):
+            if re.fullmatch(r"\d+(?:\.\d+)*", directory.name):
+                executable = directory / (name + suffix)
+                if executable.is_file() and os.access(executable, os.X_OK):
+                    candidates.append((tuple(map(int, directory.name.split("."))), executable))
+        if candidates:
+            return str(max(candidates)[1])
+    raise PublishError(
+        f"Android {name} is unavailable on PATH or in "
+        "ANDROID_SDK_ROOT/ANDROID_HOME build-tools."
+    )
+
+
 def _verify_apk(apk: Path) -> str:
     if not apk.is_file() or apk.stat().st_size == 0:
         raise PublishError("The build artifact is missing or empty.")
     try:
         result = subprocess.run(
-            ["apksigner", "verify", "--verbose", str(apk)],
+            [_android_tool("apksigner"), "verify", "--verbose", str(apk)],
             check=False,
             capture_output=True,
             text=True,
@@ -151,7 +178,7 @@ def _verify_apk(apk: Path) -> str:
 def _apk_version(apk: Path) -> tuple[str, str]:
     try:
         result = subprocess.run(
-            ["aapt", "dump", "badging", str(apk)],
+            [_android_tool("aapt"), "dump", "badging", str(apk)],
             check=False, capture_output=True, text=True,
         )
     except OSError as error:

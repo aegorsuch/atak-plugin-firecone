@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,6 +14,7 @@ from publish_github_release import (
     STABLE_ASSET_NAME,
     publish,
     _asset,
+    _android_tool,
 )
 
 
@@ -200,6 +202,9 @@ class PublishReleaseTests(unittest.TestCase):
         )
         network.start()
         self.addCleanup(network.stop)
+        tool = patch("publish_github_release._android_tool", side_effect=lambda name: name)
+        tool.start()
+        self.addCleanup(tool.stop)
         self.temp_dir = tempfile.TemporaryDirectory()
         Path(self.temp_dir.name, "ATAK-Plugin-Firecone-5.6.0-aaaaaaa.apk").write_bytes(
             APK_BYTES
@@ -557,6 +562,33 @@ class PublishReleaseTests(unittest.TestCase):
                 release_metadata(environment(), "0.1", "123", APK_DIGEST, previous)
         with self.assertRaises(PublishError):
             release_metadata(environment(CI_COMMIT_SHA="aaaaaaa"), "0.1", "123", APK_DIGEST)
+
+
+class AndroidToolTests(unittest.TestCase):
+    def test_path_tools_take_precedence(self):
+        with patch("publish_github_release.shutil.which", return_value="sdk-tool"):
+            self.assertEqual(_android_tool("aapt"), "sdk-tool")
+
+    def test_sdk_environment_resolves_highest_stable_build_tools(self):
+        with tempfile.TemporaryDirectory() as folder:
+            for version in ("9.0.0", "35.0.0", "36.0.0-rc1"):
+                directory = Path(folder, "build-tools", version)
+                directory.mkdir(parents=True)
+                (directory / ("aapt.exe" if os.name == "nt" else "aapt")).write_bytes(b"tool")
+                if os.name != "nt":
+                    (directory / "aapt").chmod(0o755)
+            for key in ("ANDROID_SDK_ROOT", "ANDROID_HOME"):
+                with self.subTest(key=key), patch.dict(
+                    os.environ, {key: folder}, clear=True
+                ), patch("publish_github_release.shutil.which", return_value=None):
+                    self.assertIn("35.0.0", _android_tool("aapt"))
+
+    def test_missing_tool_fails_without_install_or_download(self):
+        with patch.dict(os.environ, {}, clear=True), patch(
+            "publish_github_release.shutil.which", return_value=None
+        ):
+            with self.assertRaisesRegex(PublishError, "ANDROID_SDK_ROOT/ANDROID_HOME"):
+                _android_tool("apksigner")
 
 
 if __name__ == "__main__":
