@@ -246,17 +246,15 @@ def release_metadata(
     }
     notes = (
         f"{NOTES_START}\n"
-        "Automatically published signed Firecone CIV APK from the protected "
-        f"TAK Forge {channel} channel.\n\n"
+        f"Automatically published stable Firecone CIV {channel}-channel build.\n\n"
         f"- APK version: **{version}** (versionCode **{code}**)\n"
         f"- Build: {build}\n"
         f"- Pipeline: {env['CI_PIPELINE_URL']}\n"
-        f"- Source commit: `{sha}` on TAK Forge `{channel}`\n"
+        f"- Source commit: `{sha}` on TAK.gov `{channel}`\n"
         f"- SHA256: `{digest}`\n\n"
-        f"[Download {label}](https://github.com/{REPOSITORY}/releases/download/"
-        f"{RELEASE_TAG}/{label})\n\n"
-        "GitHub source archives follow the release tag; the source commit above "
-        "is authoritative.\n"
+        "Install the APK above. GitHub's \"Source code\" archives come from the "
+        "fixed release anchor tag, not from this build; the source commit above "
+        "is authoritative and may not yet be mirrored to GitHub.\n"
         f"<!-- firecone-pipeline-v1 {json.dumps(metadata, sort_keys=True)} -->\n"
         f"{NOTES_END}"
     )

@@ -543,8 +543,26 @@ class PublishReleaseTests(unittest.TestCase):
         _, notes, _ = release_metadata(
             environment(CI_COMMIT_BRANCH="develop"), "0.1", "123", APK_DIGEST
         )
-        self.assertIn("TAK Forge develop channel", notes)
-        self.assertIn("on TAK Forge `develop`", notes)
+        self.assertIn("stable Firecone CIV develop-channel build.", notes)
+        self.assertIn("on TAK.gov `develop`", notes)
+
+    def test_visible_notes_match_reference_layout_exactly(self):
+        import re
+        _, notes, _ = release_metadata(
+            environment(), "0.1 (aaaaaaa) - [5.6.0]", "123", APK_DIGEST
+        )
+        visible = re.sub(r"<!--.*?-->", "", notes, flags=re.DOTALL).strip()
+        self.assertEqual(visible, (
+            "Automatically published stable Firecone CIV main-channel build.\n\n"
+            "- APK version: **0.1 (aaaaaaa) - [5.6.0]** (versionCode **123**)\n"
+            "- Build: GitLab pipeline **42** (project pipeline **7**)\n"
+            "- Pipeline: https://git.tak.gov/aegorsuch/atak-plugin-firecone/-/pipelines/42\n"
+            f"- Source commit: `{'a' * 40}` on TAK.gov `main`\n"
+            f"- SHA256: `{APK_DIGEST}`\n\n"
+            "Install the APK above. GitHub's \"Source code\" archives come from the "
+            "fixed release anchor tag, not from this build; the source commit above "
+            "is authoritative and may not yet be mirrored to GitHub."
+        ))
 
     def test_noncanonical_pipeline_link_is_rejected(self):
         with self.assertRaisesRegex(PublishError, "canonical pipeline"):
