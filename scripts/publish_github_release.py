@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -17,7 +18,9 @@ from urllib.request import Request, urlopen
 
 REPOSITORY = "aegorsuch/atak-plugin-firecone"
 RELEASE_TAG = "pipeline-latest"
-RELEASE_TITLE = "TAK Forge Automated Pipeline"
+RELEASE_TITLE = "TAK.gov Forge CI/CD Pipeline Release"
+NOTES_START = "<!-- firecone-pipeline-release:start -->"
+NOTES_END = "<!-- firecone-pipeline-release:end -->"
 STABLE_ASSET_NAME = "ATAK-Plugin-Firecone-latest.apk"
 GITHUB_API = "https://api.github.com"
 
@@ -145,6 +148,108 @@ def _verify_apk(apk: Path) -> str:
     return digest.hexdigest()
 
 
+def _apk_version(apk: Path) -> tuple[str, str]:
+    try:
+        result = subprocess.run(
+            ["aapt", "dump", "badging", str(apk)],
+            check=False, capture_output=True, text=True,
+        )
+    except OSError as error:
+        raise PublishError("Android aapt is unavailable in the CI image.") from error
+    match = re.search(
+        r"^package: name='com\.atakmap\.android\.firecone\.plugin' "
+        r"versionCode='(\d+)' versionName='([^'\r\n]+)'",
+        result.stdout, re.MULTILINE,
+    )
+    if result.returncode != 0 or match is None:
+        raise PublishError("Unable to read the Firecone APK version and versionCode.")
+    return match[2], match[1]
+
+
+def release_metadata(
+    env: dict[str, str], version: str, code: str, digest: str, previous: str = ""
+) -> tuple[str, str, str]:
+    sha = env["CI_COMMIT_SHA"]
+    if not re.fullmatch(r"[0-9a-f]{40}", sha):
+        raise PublishError("The source commit must be a full Git SHA.")
+    if not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise PublishError("The APK checksum must be a SHA-256 digest.")
+    pipeline = env["CI_PIPELINE_ID"]
+    if not pipeline.isdecimal():
+        raise PublishError("The pipeline ID must be numeric.")
+    iid = env.get("CI_PIPELINE_IID", "")
+    if iid and not iid.isdecimal():
+        raise PublishError("The project pipeline IID must be numeric.")
+    channel = env["CI_COMMIT_BRANCH"]
+    if channel not in {"main", "develop"}:
+        raise PublishError("Unsupported release channel.")
+    expected_url = f"https://git.tak.gov/{REPOSITORY}/-/pipelines/{pipeline}"
+    if env["CI_PIPELINE_URL"] != expected_url:
+        raise PublishError("The pipeline URL must identify the canonical pipeline.")
+    if not code.isdecimal() or not version.strip():
+        raise PublishError("The APK version and versionCode must be present.")
+    # ATAK versionName embeds the revision; the title uses the plugin version.
+    title_version = version.split(" (", 1)[0]
+    title = f"{RELEASE_TITLE} (Firecone {title_version}, code {code})"
+    label = f"Firecone {title_version} CIV APK (code {code})"
+    build = f"GitLab pipeline **{pipeline}**"
+    if iid:
+        build += f" (project pipeline **{iid}**)"
+    metadata = {
+        "pipeline_id": pipeline, "pipeline_iid": iid or None,
+        "source_sha": sha, "sha256": digest,
+    }
+    notes = (
+        f"{NOTES_START}\n"
+        "Automatically published signed Firecone CIV APK from the protected "
+        f"TAK Forge {channel} channel.\n\n"
+        f"- APK version: **{version}** (versionCode **{code}**)\n"
+        f"- Build: {build}\n"
+        f"- Pipeline: {env['CI_PIPELINE_URL']}\n"
+        f"- Source commit: `{sha}` on TAK Forge `{channel}`\n"
+        f"- SHA256: `{digest}`\n\n"
+        f"[Download {label}](https://github.com/{REPOSITORY}/releases/download/"
+        f"{RELEASE_TAG}/{STABLE_ASSET_NAME})\n\n"
+        "GitHub source archives follow the release tag; the source commit above "
+        "is authoritative.\n"
+        f"<!-- firecone-pipeline-v1 {json.dumps(metadata, sort_keys=True)} -->\n"
+        f"{NOTES_END}"
+    )
+    if NOTES_START in previous or NOTES_END in previous:
+        if previous.count(NOTES_START) != 1 or previous.count(NOTES_END) != 1:
+            raise PublishError("Release notes contain ambiguous managed boundaries.")
+        start = previous.index(NOTES_START)
+        end = previous.index(NOTES_END) + len(NOTES_END)
+        if end <= start:
+            raise PublishError("Release notes contain reversed managed boundaries.")
+        notes = previous[:start] + notes + previous[end:]
+    else:
+        # Migrate only the exact legacy publisher paragraphs, never manual notes.
+        previous = re.sub(
+            r"\ASigned CIV APK from TAK\.gov pipeline (?:\[\d+\]\([^\n]+\) at "
+            r"`[0-9a-f]{40}`\.\n\nBuild job \[\d+\]\([^\n]+\); "
+            r"artifact `[^`\n]+`; SHA-256 `[0-9a-f]{64}`\."
+            r"|\d+ \(https://git\.tak\.gov/[^\n]+\) at commit [0-9a-f]{40}\."
+            r"\n\nBuild job \d+ \(https://git\.tak\.gov/[^\n]+\)\. "
+            r"Artifact [^\n]+\. SHA-256: [0-9A-Fa-f]{64}\.)",
+            "", previous, count=1,
+        )
+        if previous.strip():
+            notes = previous.rstrip() + "\n\n" + notes
+    return title, notes, label
+
+
+def _published_pipeline(body: str) -> int | None:
+    marker = re.search(r"<!-- firecone-pipeline-v1 (.*?) -->", body)
+    if marker:
+        try:
+            return int(json.loads(marker[1])["pipeline_id"])
+        except (ValueError, TypeError, KeyError) as error:
+            raise PublishError("Invalid managed release pipeline metadata.") from error
+    legacy = re.match(r"Signed CIV APK from TAK\.gov pipeline \[?(\d+)", body)
+    return int(legacy[1]) if legacy else None
+
+
 def _asset(
     opener: Opener, release_id: int, name: str, token: str
 ) -> dict[str, Any] | None:
@@ -235,6 +340,8 @@ def publish(
     apk = artifacts[0]
     digest = _verify_apk(apk)
     size = apk.stat().st_size
+    version, code = _apk_version(apk)
+    title, notes, label = release_metadata(env, version, code, digest)
 
     release_path = f"/repos/{REPOSITORY}/releases/tags/{RELEASE_TAG}"
     status, response = _http(
@@ -249,7 +356,7 @@ def publish(
             body={
                 "tag_name": RELEASE_TAG,
                 "target_commitish": env["CI_COMMIT_SHA"],
-                "name": RELEASE_TITLE,
+                "name": title,
                 "body": "Rolling signed CIV APK from the newest successful protected "
                 "TAK.gov main pipeline.",
                 "draft": True,
@@ -258,6 +365,12 @@ def publish(
         )
     else:
         release = _json_response(status, response, "GitHub rolling release lookup")
+    previous = release.get("body") or ""
+    previous_pipeline = _published_pipeline(previous)
+    if previous_pipeline is not None and previous_pipeline > int(env["CI_PIPELINE_ID"]):
+        print("Skipping pipeline older than the published release.")
+        return False
+    title, notes, label = release_metadata(env, version, code, digest, previous)
     release_id = release.get("id")
     upload_url = release.get("upload_url")
     if not isinstance(release_id, int) or not isinstance(upload_url, str):
@@ -312,7 +425,7 @@ def publish(
             "PATCH",
             f"/repos/{REPOSITORY}/releases/assets/{candidate['id']}",
             token,
-            body={"name": STABLE_ASSET_NAME},
+            body={"name": STABLE_ASSET_NAME, "label": label},
         )
         _validate_uploaded_asset(
             opener, promoted, STABLE_ASSET_NAME, size, digest, token
@@ -328,21 +441,15 @@ def publish(
             )
         raise
 
-    notes = (
-        f"Signed CIV APK from TAK.gov pipeline [{env['CI_PIPELINE_ID']}]"
-        f"({env['CI_PIPELINE_URL']}) at `{env['CI_COMMIT_SHA']}`.\n\n"
-        f"Build job [{env['CI_JOB_ID']}]({env['CI_JOB_URL']}); "
-        f"artifact `{apk.name}`; SHA-256 `{digest}`."
-    )
     published = _github_json(
         opener,
         "PATCH",
         f"/repos/{REPOSITORY}/releases/{release_id}",
         token,
-        body={"name": RELEASE_TITLE, "body": notes, "draft": False, "prerelease": False},
+        body={"name": title, "body": notes, "draft": False, "prerelease": False},
     )
     if (
-        published.get("name") != RELEASE_TITLE
+        published.get("name") != title
         or published.get("draft") is not False
         or published.get("prerelease") is not False
     ):

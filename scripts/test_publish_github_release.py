@@ -9,7 +9,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from publish_github_release import (
     PublishError,
-    RELEASE_TITLE,
+    release_metadata,
     STABLE_ASSET_NAME,
     publish,
 )
@@ -43,6 +43,7 @@ class FakeGitHub:
         omit_digest: bool = False,
         missing_release: bool = False,
         fail_promotion: bool = False,
+        previous_body: str = "",
     ):
         self.calls = []
         self.stable_asset = stable_asset
@@ -50,6 +51,7 @@ class FakeGitHub:
         self.omit_digest = omit_digest
         self.missing_release = missing_release
         self.fail_promotion = fail_promotion
+        self.previous_body = previous_body
 
     def __call__(self, request, timeout=60):
         url = urlsplit(request.full_url)
@@ -78,6 +80,7 @@ class FakeGitHub:
             return Response(
                 {
                     "id": 7,
+                    "body": self.previous_body,
                     "upload_url": "https://uploads.github.com/repos/aegorsuch/"
                     "atak-plugin-firecone/releases/7/assets{?name,label}",
                 }
@@ -149,7 +152,7 @@ class FakeGitHub:
             )
         if method == "PATCH" and path.endswith("/releases/7"):
             return Response(
-                {"id": 7, "name": RELEASE_TITLE, "draft": False, "prerelease": False}
+                {"id": 7, "name": body["name"], "draft": False, "prerelease": False}
             )
         if method == "PATCH" and path.endswith("/git/refs/tags/pipeline-latest"):
             return Response({"ref": "refs/tags/pipeline-latest"})
@@ -167,7 +170,8 @@ def environment(**updates):
         "CI_COMMIT_SHA": "a" * 40,
         "CI_COMMIT_SHORT_SHA": "aaaaaaa",
         "CI_PIPELINE_ID": "42",
-        "CI_PIPELINE_URL": "https://git.tak.gov/pipelines/42",
+        "CI_PIPELINE_IID": "7",
+        "CI_PIPELINE_URL": "https://git.tak.gov/aegorsuch/atak-plugin-firecone/-/pipelines/42",
         "CI_JOB_ID": "99",
         "CI_JOB_URL": "https://git.tak.gov/jobs/99",
         "GITHUB_RELEASE_TOKEN": "masked-github-token",
@@ -202,6 +206,12 @@ class PublishReleaseTests(unittest.TestCase):
             )
         if args[:3] == ["apksigner", "verify", "--verbose"]:
             return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if args[:3] == ["aapt", "dump", "badging"]:
+            return SimpleNamespace(
+                returncode=0,
+                stdout="package: name='com.atakmap.android.firecone.plugin' "
+                "versionCode='123' versionName='0.1 (aaaaaaa) - [5.6.0]'",
+            )
         raise AssertionError(f"Unexpected subprocess: {args}")
 
     def test_replaces_only_rolling_asset_after_verified_upload(self):
@@ -243,7 +253,14 @@ class PublishReleaseTests(unittest.TestCase):
             call for call in github.calls
             if call[0] == "PATCH" and call[1].endswith("/releases/7")
         )
-        self.assertEqual(update[2]["name"], "TAK Forge Automated Pipeline")
+        self.assertEqual(
+            update[2]["name"], "TAK.gov Forge CI/CD Pipeline Release (Firecone 0.1, code 123)"
+        )
+        self.assertIn("project pipeline **7**", update[2]["body"])
+        self.assertIn("Source commit: `" + "a" * 40 + "`", update[2]["body"])
+        self.assertEqual(
+            promoted[0][2]["label"], "Firecone 0.1 CIV APK (code 123)"
+        )
         self.assertFalse(update[2]["draft"])
         self.assertFalse(update[2]["prerelease"])
         self.assertIn(APK_DIGEST, update[2]["body"])
@@ -385,7 +402,9 @@ class PublishReleaseTests(unittest.TestCase):
             for call in github.calls
             if call[0] == "POST" and call[1].endswith("/releases")
         )
-        self.assertEqual(create[2]["name"], "TAK Forge Automated Pipeline")
+        self.assertEqual(
+            create[2]["name"], "TAK.gov Forge CI/CD Pipeline Release (Firecone 0.1, code 123)"
+        )
         self.assertEqual(create[2]["tag_name"], "pipeline-latest")
         self.assertTrue(create[2]["draft"])
         self.assertFalse(create[2]["prerelease"])
@@ -397,6 +416,95 @@ class PublishReleaseTests(unittest.TestCase):
                 for call in github.calls
             )
         )
+
+    def test_manual_notes_survive_repeated_managed_updates(self):
+        manual = "Operator notes: keep this exactly.\n\n"
+        _, notes, label = release_metadata(
+            environment(), "0.1 (aaaaaaa) - [5.6.0]", "123", APK_DIGEST, manual
+        )
+        _, updated, _ = release_metadata(
+            environment(), "0.2 (bbbbbbb) - [5.6.0]", "124", APK_DIGEST, notes
+        )
+        self.assertTrue(updated.startswith(manual))
+        self.assertNotIn("0.1 (aaaaaaa)", updated)
+        self.assertEqual(updated.count("<!-- firecone-pipeline-release:start -->"), 1)
+        self.assertNotIn(APK_DIGEST, label)
+
+    def test_known_legacy_notes_are_migrated_without_duplicate_checksum(self):
+        legacy = (
+            f"Signed CIV APK from TAK.gov pipeline [41](https://git.tak.gov/p/41) "
+            f"at `{'a' * 40}`.\n\nBuild job [99](https://git.tak.gov/j/99); "
+            f"artifact `old.apk`; SHA-256 `{APK_DIGEST}`.\n\nManual tail."
+        )
+        _, notes, _ = release_metadata(
+            environment(), "0.1", "123", APK_DIGEST, legacy
+        )
+        self.assertIn("Manual tail.", notes)
+        self.assertNotIn("old.apk", notes)
+        self.assertEqual(notes.count("- SHA256:"), 1)
+
+    def test_plain_legacy_live_notes_are_migrated(self):
+        legacy = (
+            "Signed CIV APK from TAK.gov pipeline 41 "
+            f"(https://git.tak.gov/p/41) at commit {'a' * 40}.\n\n"
+            "Build job 99 (https://git.tak.gov/j/99). Artifact old.apk. "
+            f"SHA-256: {APK_DIGEST.upper()}."
+        )
+        _, notes, _ = release_metadata(environment(), "0.1", "123", APK_DIGEST, legacy)
+        self.assertNotIn("old.apk", notes)
+        self.assertEqual(notes.count("- SHA256:"), 1)
+
+    def test_newer_published_pipeline_prevents_mutation(self):
+        _, previous, _ = release_metadata(
+            environment(
+                CI_PIPELINE_ID="43",
+                CI_PIPELINE_URL="https://git.tak.gov/aegorsuch/atak-plugin-firecone/-/pipelines/43",
+            ), "0.1", "123", APK_DIGEST
+        )
+        github = FakeGitHub(previous_body=previous)
+        self.assertFalse(publish(environment(), github, Path(self.temp_dir.name)))
+        self.assertEqual([call[0] for call in github.calls], ["GET"])
+
+    def test_version_inspection_failure_prevents_github_access(self):
+        def commands(args, **kwargs):
+            if args[0] == "aapt":
+                return SimpleNamespace(returncode=1, stdout="")
+            return self.fake_commands(args, **kwargs)
+        self.mock_signer.side_effect = commands
+        github = FakeGitHub()
+        with self.assertRaisesRegex(PublishError, "versionCode"):
+            publish(environment(), github, Path(self.temp_dir.name))
+        self.assertEqual(github.calls, [])
+
+    def test_metadata_without_project_iid_does_not_invent_one(self):
+        _, notes, _ = release_metadata(
+            environment(CI_PIPELINE_IID=""), "0.1", "123", APK_DIGEST
+        )
+        self.assertNotIn("project pipeline **", notes)
+
+    def test_historical_channel_is_not_relabelled_as_main(self):
+        _, notes, _ = release_metadata(
+            environment(CI_COMMIT_BRANCH="develop"), "0.1", "123", APK_DIGEST
+        )
+        self.assertIn("TAK Forge develop channel", notes)
+        self.assertIn("on TAK Forge `develop`", notes)
+
+    def test_noncanonical_pipeline_link_is_rejected(self):
+        with self.assertRaisesRegex(PublishError, "canonical pipeline"):
+            release_metadata(
+                environment(CI_PIPELINE_URL="https://example.com/42"),
+                "0.1", "123", APK_DIGEST,
+            )
+
+    def test_ambiguous_markers_and_incomplete_source_are_rejected(self):
+        for previous in (
+            "<!-- firecone-pipeline-release:start -->",
+            "<!-- firecone-pipeline-release:end --><!-- firecone-pipeline-release:start -->",
+        ):
+            with self.subTest(previous=previous), self.assertRaises(PublishError):
+                release_metadata(environment(), "0.1", "123", APK_DIGEST, previous)
+        with self.assertRaises(PublishError):
+            release_metadata(environment(CI_COMMIT_SHA="aaaaaaa"), "0.1", "123", APK_DIGEST)
 
 
 if __name__ == "__main__":
