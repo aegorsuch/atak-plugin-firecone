@@ -79,5 +79,8 @@ skips outdated commits without requiring another CI credential. The
 project, after both the signed build and the offline publisher tests succeed.
 It downloads the signed build's artifacts without rebuilding or resigning
 them. Its existing launcher image must provide Python 3.10+, Git, and Android
-`apksigner` and `aapt`. The publisher script's mocked tests can be run offline with
+`apksigner` and `aapt`. Tools are resolved from `PATH`, then installed stable
+build-tools under `ANDROID_SDK_ROOT` or `ANDROID_HOME` (highest version first);
+missing tools fail explicitly, without downloading or installing anything.
+The publisher script's mocked tests can be run offline with
 `python -m unittest discover -s scripts -p "test_*.py"`.
