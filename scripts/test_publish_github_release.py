@@ -12,6 +12,7 @@ from publish_github_release import (
     release_metadata,
     STABLE_ASSET_NAME,
     publish,
+    _asset,
 )
 
 
@@ -44,6 +45,8 @@ class FakeGitHub:
         missing_release: bool = False,
         fail_promotion: bool = False,
         previous_body: str = "",
+        versioned_asset: bool = False,
+        versioned_digest: str = APK_DIGEST,
     ):
         self.calls = []
         self.stable_asset = stable_asset
@@ -52,6 +55,8 @@ class FakeGitHub:
         self.missing_release = missing_release
         self.fail_promotion = fail_promotion
         self.previous_body = previous_body
+        self.versioned_asset = versioned_asset
+        self.versioned_digest = versioned_digest
 
     def __call__(self, request, timeout=60):
         url = urlsplit(request.full_url)
@@ -95,11 +100,17 @@ class FakeGitHub:
             )
         if path.endswith("/releases/7/assets") and method == "GET":
             assets = []
+            if self.versioned_asset:
+                assets.append({
+                    "id": 12, "name": "Firecone-0.1-p7.apk",
+                    "label": "Firecone-0.1-p7.apk", "state": "uploaded",
+                    "size": len(APK_BYTES), "digest": f"sha256:{self.versioned_digest}",
+                })
             if self.stable_asset:
                 assets.append(
                     {
-                        "id": 11,
-                        "name": STABLE_ASSET_NAME,
+                            "id": 11,
+                            "name": STABLE_ASSET_NAME,
                         "state": "uploaded",
                         "size": 3,
                         "digest": "sha256:old",
@@ -144,7 +155,8 @@ class FakeGitHub:
             return Response(
                 {
                     "id": 12,
-                    "name": STABLE_ASSET_NAME,
+                    "name": "Firecone-0.1-p7.apk",
+                    "label": "Firecone-0.1-p7.apk",
                     "state": "uploaded",
                     "size": len(APK_BYTES),
                     "digest": None if self.omit_digest else f"sha256:{APK_DIGEST}",
@@ -214,7 +226,7 @@ class PublishReleaseTests(unittest.TestCase):
             )
         raise AssertionError(f"Unexpected subprocess: {args}")
 
-    def test_replaces_only_rolling_asset_after_verified_upload(self):
+    def test_publishes_versioned_asset_and_preserves_legacy_download(self):
         github = FakeGitHub()
 
         self.assertTrue(publish(environment(), github, Path(self.temp_dir.name)))
@@ -226,19 +238,19 @@ class PublishReleaseTests(unittest.TestCase):
         ]
         removed = [call for call in github.calls if call[0] == "DELETE"]
         self.assertEqual(len(promoted), 1)
-        self.assertEqual(len(removed), 1)
-        self.assertTrue(removed[0][1].endswith("/assets/11"))
+        self.assertEqual(removed, [])
+        self.assertFalse(any(call[1].endswith("/assets/11") for call in github.calls))
         upload_index = next(
             i for i, call in enumerate(github.calls) if call[0] == "POST"
         )
-        backup_index = next(
+        promotion_index = next(
             i
             for i, call in enumerate(github.calls)
-            if call[0] == "PATCH" and call[1].endswith("/assets/11")
+            if call[0] == "PATCH" and call[1].endswith("/assets/12")
         )
         self.assertLess(
             upload_index,
-            backup_index,
+            promotion_index,
         )
         self.assertEqual(
             [
@@ -246,7 +258,7 @@ class PublishReleaseTests(unittest.TestCase):
                 for call in github.calls
                 if call[0] == "PATCH" and "/assets/" in call[1]
             ][0][2],
-            {"name": "firecone-previous-99-aaaaaaa.apk"},
+            {"name": "Firecone-0.1-p7.apk", "label": "Firecone-0.1-p7.apk"},
         )
         self.assertFalse(any(call[1].endswith("/assets/13") for call in github.calls))
         update = next(
@@ -254,17 +266,19 @@ class PublishReleaseTests(unittest.TestCase):
             if call[0] == "PATCH" and call[1].endswith("/releases/7")
         )
         self.assertEqual(
-            update[2]["name"], "TAK.gov Forge CI/CD Pipeline Release (Firecone 0.1, code 123)"
+            update[2]["name"], "TAK.gov Forge CI/CD Pipeline Release (0.1-p7)"
         )
         self.assertIn("project pipeline **7**", update[2]["body"])
         self.assertIn("Source commit: `" + "a" * 40 + "`", update[2]["body"])
         self.assertEqual(
-            promoted[0][2]["label"], "Firecone 0.1 CIV APK (code 123)"
+            promoted[0][2]["label"], "Firecone-0.1-p7.apk"
         )
         self.assertFalse(update[2]["draft"])
         self.assertFalse(update[2]["prerelease"])
         self.assertIn(APK_DIGEST, update[2]["body"])
         self.assertIn(environment()["CI_PIPELINE_URL"], update[2]["body"])
+        self.assertIn('"asset_id": 12', update[2]["body"])
+        self.assertIn('"asset_name": "Firecone-0.1-p7.apk"', update[2]["body"])
 
     def test_missing_token_fails_before_subprocess_or_github_access(self):
         github = FakeGitHub()
@@ -345,7 +359,7 @@ class PublishReleaseTests(unittest.TestCase):
         ]
         self.assertEqual(len(downloads), 2)
 
-    def test_failed_promotion_restores_previous_rolling_asset(self):
+    def test_failed_promotion_does_not_touch_previous_downloads(self):
         github = FakeGitHub(fail_promotion=True)
 
         with self.assertRaisesRegex(RuntimeError, "GitHub PATCH.*HTTP 500"):
@@ -356,10 +370,7 @@ class PublishReleaseTests(unittest.TestCase):
             for call in github.calls
             if call[0] == "PATCH" and call[1].endswith("/assets/11")
         ]
-        self.assertEqual(
-            [call[2]["name"] for call in renames],
-            ["firecone-previous-99-aaaaaaa.apk", STABLE_ASSET_NAME],
-        )
+        self.assertEqual(renames, [])
         self.assertFalse(any(call[0] == "DELETE" for call in github.calls))
 
     def test_unsigned_apk_is_not_uploaded(self):
@@ -403,7 +414,7 @@ class PublishReleaseTests(unittest.TestCase):
             if call[0] == "POST" and call[1].endswith("/releases")
         )
         self.assertEqual(
-            create[2]["name"], "TAK.gov Forge CI/CD Pipeline Release (Firecone 0.1, code 123)"
+            create[2]["name"], "TAK.gov Forge CI/CD Pipeline Release (0.1-p7)"
         )
         self.assertEqual(create[2]["tag_name"], "pipeline-latest")
         self.assertTrue(create[2]["draft"])
@@ -477,10 +488,51 @@ class PublishReleaseTests(unittest.TestCase):
         self.assertEqual(github.calls, [])
 
     def test_metadata_without_project_iid_does_not_invent_one(self):
-        _, notes, _ = release_metadata(
+        title, notes, label = release_metadata(
             environment(CI_PIPELINE_IID=""), "0.1", "123", APK_DIGEST
         )
         self.assertNotIn("project pipeline **", notes)
+        self.assertEqual(label, "Firecone-0.1-code123.apk")
+        self.assertEqual(title, "TAK.gov Forge CI/CD Pipeline Release (0.1-code123)")
+
+    def test_existing_pipeline_suffix_is_not_duplicated(self):
+        title, _, label = release_metadata(
+            environment(), "0.1-p7", "123", APK_DIGEST
+        )
+        self.assertEqual(label, "Firecone-0.1-p7.apk")
+        self.assertEqual(title, "TAK.gov Forge CI/CD Pipeline Release (0.1-p7)")
+        with self.assertRaisesRegex(PublishError, "conflicts"):
+            release_metadata(environment(), "0.1-p8", "123", APK_DIGEST)
+
+    def test_invalid_filename_version_is_rejected(self):
+        for version in ("../bad", "0.1+hash", "", "0.1\nunexpected"):
+            with self.subTest(version=version), self.assertRaises(PublishError):
+                release_metadata(environment(), version, "123", APK_DIGEST)
+
+    def test_asset_lookup_paginates_retained_downloads(self):
+        calls = []
+        def pages(request, **_):
+            calls.append(request.full_url)
+            if parse_qs(urlsplit(request.full_url).query)["page"] == ["1"]:
+                return Response([{"name": f"manual-{i}"} for i in range(100)])
+            return Response([{"id": 12, "name": "Firecone-0.1-p7.apk"}])
+        self.assertEqual(
+            _asset(pages, 7, "Firecone-0.1-p7.apk", "mock")["id"], 12
+        )
+        self.assertEqual(len(calls), 2)
+        self.assertIn("page=2", calls[1])
+
+    def test_matching_versioned_asset_is_reused_without_upload_or_rename(self):
+        github = FakeGitHub(versioned_asset=True)
+        self.assertTrue(publish(environment(), github, Path(self.temp_dir.name)))
+        self.assertFalse(any(call[0] in {"POST", "DELETE"} for call in github.calls))
+        self.assertFalse(any("/assets/" in call[1] for call in github.calls))
+
+    def test_different_bytes_at_versioned_url_are_never_replaced(self):
+        github = FakeGitHub(versioned_asset=True, versioned_digest="0" * 64)
+        with self.assertRaisesRegex(PublishError, "SHA-256 digest"):
+            publish(environment(), github, Path(self.temp_dir.name))
+        self.assertTrue(all(call[0] == "GET" for call in github.calls))
 
     def test_historical_channel_is_not_relabelled_as_main(self):
         _, notes, _ = release_metadata(

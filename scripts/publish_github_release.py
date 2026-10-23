@@ -166,8 +166,26 @@ def _apk_version(apk: Path) -> tuple[str, str]:
     return match[2], match[1]
 
 
+def _release_version(env: dict[str, str], version: str, code: str) -> str:
+    base = version.split(" (", 1)[0]
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", base):
+        raise PublishError("The APK version cannot be used in a release filename.")
+    iid = env.get("CI_PIPELINE_IID", "")
+    if iid:
+        if not iid.isdecimal():
+            raise PublishError("The project pipeline IID must be numeric.")
+        suffix = re.search(r"-p(\d+)$", base)
+        if suffix:
+            if suffix[1] != iid:
+                raise PublishError("The APK pipeline suffix conflicts with this pipeline IID.")
+            return base
+        return f"{base}-p{iid}"
+    return f"{base}-code{code}"
+
+
 def release_metadata(
-    env: dict[str, str], version: str, code: str, digest: str, previous: str = ""
+    env: dict[str, str], version: str, code: str, digest: str, previous: str = "",
+    asset_id: int | None = None,
 ) -> tuple[str, str, str]:
     sha = env["CI_COMMIT_SHA"]
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
@@ -188,16 +206,16 @@ def release_metadata(
         raise PublishError("The pipeline URL must identify the canonical pipeline.")
     if not code.isdecimal() or not version.strip():
         raise PublishError("The APK version and versionCode must be present.")
-    # ATAK versionName embeds the revision; the title uses the plugin version.
-    title_version = version.split(" (", 1)[0]
-    title = f"{RELEASE_TITLE} (Firecone {title_version}, code {code})"
-    label = f"Firecone {title_version} CIV APK (code {code})"
+    release_version = _release_version(env, version, code)
+    title = f"{RELEASE_TITLE} ({release_version})"
+    label = f"Firecone-{release_version}.apk"
     build = f"GitLab pipeline **{pipeline}**"
     if iid:
         build += f" (project pipeline **{iid}**)"
     metadata = {
         "pipeline_id": pipeline, "pipeline_iid": iid or None,
         "source_sha": sha, "sha256": digest,
+        "asset_name": label, "asset_id": asset_id,
     }
     notes = (
         f"{NOTES_START}\n"
@@ -209,7 +227,7 @@ def release_metadata(
         f"- Source commit: `{sha}` on TAK Forge `{channel}`\n"
         f"- SHA256: `{digest}`\n\n"
         f"[Download {label}](https://github.com/{REPOSITORY}/releases/download/"
-        f"{RELEASE_TAG}/{STABLE_ASSET_NAME})\n\n"
+        f"{RELEASE_TAG}/{label})\n\n"
         "GitHub source archives follow the release tag; the source commit above "
         "is authoritative.\n"
         f"<!-- firecone-pipeline-v1 {json.dumps(metadata, sort_keys=True)} -->\n"
@@ -253,17 +271,28 @@ def _published_pipeline(body: str) -> int | None:
 def _asset(
     opener: Opener, release_id: int, name: str, token: str
 ) -> dict[str, Any] | None:
-    path = f"/repos/{REPOSITORY}/releases/{release_id}/assets?per_page=100"
-    status, response = _http(opener, "GET", f"{GITHUB_API}{path}", token)
-    if status < 200 or status >= 300:
-        raise PublishError(f"Unable to list assets for rolling release (HTTP {status}).")
-    try:
-        assets = json.loads(response)
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise PublishError("GitHub returned an invalid release-assets response.") from error
-    if not isinstance(assets, list):
-        raise PublishError("GitHub returned an unexpected release-assets response.")
-    matches = [item for item in assets if isinstance(item, dict) and item.get("name") == name]
+    matches = []
+    page = 1
+    while True:
+        path = (
+            f"/repos/{REPOSITORY}/releases/{release_id}/assets"
+            f"?per_page=100&page={page}"
+        )
+        status, response = _http(opener, "GET", f"{GITHUB_API}{path}", token)
+        if status < 200 or status >= 300:
+            raise PublishError(f"Unable to list assets for rolling release (HTTP {status}).")
+        try:
+            assets = json.loads(response)
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise PublishError("GitHub returned an invalid release-assets response.") from error
+        if not isinstance(assets, list):
+            raise PublishError("GitHub returned an unexpected release-assets response.")
+        matches.extend(
+            item for item in assets if isinstance(item, dict) and item.get("name") == name
+        )
+        if len(assets) < 100:
+            break
+        page += 1
     if len(matches) > 1:
         raise PublishError(f"The rolling release has duplicate {name} assets.")
     return matches[0] if matches else None
@@ -376,11 +405,18 @@ def publish(
     if not isinstance(release_id, int) or not isinstance(upload_url, str):
         raise PublishError("GitHub returned an invalid rolling release.")
 
+    target = _asset(opener, release_id, label, token)
+    if target:
+        # A versioned download is immutable, including when a CI job is retried.
+        _validate_uploaded_asset(opener, target, label, size, digest, token)
+
     candidate_name = (
         f"firecone-candidate-{env['CI_JOB_ID']}-{env['CI_COMMIT_SHORT_SHA']}.apk"
     )
-    current_candidate = _asset(opener, release_id, candidate_name, token)
-    if current_candidate:
+    current_candidate = None if target else _asset(opener, release_id, candidate_name, token)
+    if target:
+        candidate = target
+    elif current_candidate:
         _validate_uploaded_asset(
             opener, current_candidate, candidate_name, size, digest, token
         )
@@ -404,42 +440,26 @@ def publish(
             opener, candidate, candidate_name, size, digest, token
         )
 
-    stable = _asset(opener, release_id, STABLE_ASSET_NAME, token)
-    backup_name = (
-        f"firecone-previous-{env['CI_JOB_ID']}-{env['CI_COMMIT_SHORT_SHA']}.apk"
-    )
-    old_asset_backed_up = False
-    if stable:
-        _github_json(
-            opener,
-            "PATCH",
-            f"/repos/{REPOSITORY}/releases/assets/{stable['id']}",
-            token,
-            body={"name": backup_name},
-        )
-        old_asset_backed_up = True
-
-    try:
+    if target:
+        promoted = target
+        if target.get("label") != label:
+            promoted = _github_json(
+                opener, "PATCH",
+                f"/repos/{REPOSITORY}/releases/assets/{target['id']}", token,
+                body={"label": label},
+            )
+    else:
         promoted = _github_json(
             opener,
             "PATCH",
             f"/repos/{REPOSITORY}/releases/assets/{candidate['id']}",
             token,
-            body={"name": STABLE_ASSET_NAME, "label": label},
+            body={"name": label, "label": label},
         )
-        _validate_uploaded_asset(
-            opener, promoted, STABLE_ASSET_NAME, size, digest, token
-        )
-    except PublishError:
-        if old_asset_backed_up:
-            _github_json(
-                opener,
-                "PATCH",
-                f"/repos/{REPOSITORY}/releases/assets/{stable['id']}",
-                token,
-                body={"name": STABLE_ASSET_NAME},
-            )
-        raise
+    _validate_uploaded_asset(opener, promoted, label, size, digest, token)
+    title, notes, label = release_metadata(
+        env, version, code, digest, previous, promoted["id"]
+    )
 
     published = _github_json(
         opener,
@@ -463,21 +483,8 @@ def publish(
         body={"sha": env["CI_COMMIT_SHA"], "force": True},
     )
 
-    if old_asset_backed_up:
-        status, _ = _http(
-            opener,
-            "DELETE",
-            f"{GITHUB_API}/repos/{REPOSITORY}/releases/assets/{stable['id']}",
-            token,
-        )
-        if status < 200 or status >= 300:
-            raise PublishError(
-                "The new APK is published, but the previous rolling APK "
-                f"could not be removed (HTTP {status})."
-            )
-
     print(
-        f"Published {STABLE_ASSET_NAME} from pipeline {env['CI_PIPELINE_ID']} "
+        f"Published {label} from pipeline {env['CI_PIPELINE_ID']} "
         f"(SHA-256 {digest})."
     )
     return True

@@ -46,18 +46,25 @@ GitHub backup after a successful protected `main` build.
 
 The protected `main` pipeline publishes only its signed CIV APK to the
 public GitHub backup as the stable release **TAK.gov Forge CI/CD Pipeline Release
-(Firecone <plugin-version>, code <versionCode>)**
-(`pipeline-latest`) with the asset `ATAK-Plugin-Firecone-latest.apk`. The
+(<plugin-version>-p<project-pipeline-IID>)**
+(`pipeline-latest`) with the asset `Firecone-<plugin-version>-p<IID>.apk`. The
 publisher verifies the APK signature and the uploaded asset digest, serializes
 updates, and skips an outdated pipeline. It does not change numbered releases
 or unrelated release assets. Version and code come from the signed APK using
 `aapt dump badging`, not from the filename or current checkout. Notes include
 the full embedded version, channel, global pipeline ID and project IID (when
 available), canonical pipeline URL, exact source SHA, separate SHA256, and a
-readable download link and asset label without hashes. Hidden managed boundaries
+readable download link and native asset label matching the APK filename without
+hashes. If no project IID is available, `-code<versionCode>` replaces `-p<IID>`;
+an already matching pipeline suffix is not duplicated. Hidden managed boundaries
 and pipeline metadata allow repeat updates while preserving manual notes.
 Only recognized legacy publisher notes are migrated; unknown text is retained.
 Pipelines older than either the canonical head or published pipeline are skipped.
+Previously published downloads, including `ATAK-Plugin-Firecone-latest.apk`,
+are retained without renaming, replacement or cosmetic deletion. Versioned
+download URLs are immutable: retries reuse identical verified bytes and fail
+on a conflicting digest. The managed marker records the current asset ID/name;
+manual/unowned assets are never cleaned up based on filename patterns.
 
 Before enabling this publisher, configure a `GITHUB_RELEASE_TOKEN` CI/CD
 variable in the canonical TAK Forge project. Use a fine-grained token limited
