@@ -60,11 +60,14 @@ an already matching pipeline suffix is not duplicated. Hidden managed boundaries
 and pipeline metadata allow repeat updates while preserving manual notes.
 Only recognized legacy publisher notes are migrated; unknown text is retained.
 Pipelines older than either the canonical head or published pipeline are skipped.
-Previously published downloads, including `ATAK-Plugin-Firecone-latest.apk`,
-are retained without renaming, replacement or cosmetic deletion. Versioned
-download URLs are immutable: retries reuse identical verified bytes and fail
-on a conflicting digest. The managed marker records the current asset ID/name;
-manual/unowned assets are never cleaned up based on filename patterns.
+The previous publisher-owned APK is backed up and removed only after the new
+APK, release metadata and tag are verified. Ownership requires the exact ID,
+name and checksum in the previous hidden marker, never a filename pattern.
+Backups of bytes and complete asset/release metadata are retained as publisher
+job artifacts for 30 days, including on job failure. Unowned/manual assets
+are never deleted. Retries reuse identical verified bytes at the current
+versioned URL and fail on a conflicting digest; previous managed download URLs
+are retired so the rolling release shows one managed APK.
 Visible notes follow the WearOS release template exactly: a stable product and
 truthful branch-channel introduction, five provenance bullets, then the install
 and fixed-anchor source-archive explanation. There is no extra download link.

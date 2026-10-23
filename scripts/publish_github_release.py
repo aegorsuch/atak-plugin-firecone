@@ -213,6 +213,7 @@ def _release_version(env: dict[str, str], version: str, code: str) -> str:
 def release_metadata(
     env: dict[str, str], version: str, code: str, digest: str, previous: str = "",
     asset_id: int | None = None,
+    previous_assets: list[dict[str, Any]] | None = None,
 ) -> tuple[str, str, str]:
     sha = env["CI_COMMIT_SHA"]
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
@@ -244,6 +245,8 @@ def release_metadata(
         "source_sha": sha, "sha256": digest,
         "asset_name": label, "asset_id": asset_id,
     }
+    if previous_assets:
+        metadata["previous_assets"] = previous_assets
     notes = (
         f"{NOTES_START}\n"
         f"Automatically published stable Firecone CIV {channel}-channel build.\n\n"
@@ -291,6 +294,83 @@ def _published_pipeline(body: str) -> int | None:
             raise PublishError("Invalid managed release pipeline metadata.") from error
     legacy = re.match(r"Signed CIV APK from TAK\.gov pipeline \[?(\d+)", body)
     return int(legacy[1]) if legacy else None
+
+
+def _previous_assets(body: str, current_id: int) -> list[dict[str, Any]]:
+    markers = re.findall(r"<!-- firecone-pipeline-v1 (.*?) -->", body)
+    if not markers:
+        return []
+    if len(markers) != 1:
+        raise PublishError("Ambiguous previous asset ownership metadata.")
+    try:
+        owner = json.loads(markers[0])
+    except json.JSONDecodeError as error:
+        raise PublishError("Invalid previous asset ownership metadata.") from error
+    if not isinstance(owner, dict):
+        raise PublishError("Invalid previous asset ownership metadata.")
+    pending = owner.get("previous_assets", [])
+    if not isinstance(pending, list) or any(not isinstance(item, dict) for item in pending):
+        raise PublishError("Invalid pending asset ownership metadata.")
+    claims = pending + [owner]
+    result = []
+    for claim in claims:
+        asset_id = claim.get("asset_id")
+        name = claim.get("asset_name")
+        digest = claim.get("sha256")
+        if asset_id is None and name is None:
+            continue
+        if (
+            type(asset_id) is not int or asset_id <= 0
+            or not isinstance(name, str) or not name
+            or not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)
+        ):
+            raise PublishError("Incomplete previous asset ownership metadata.")
+        if asset_id != current_id:
+            identity = {"asset_id": asset_id, "asset_name": name, "sha256": digest}
+            if identity not in result:
+                result.append(identity)
+    return result
+
+
+def _retire_previous_asset(
+    opener: Opener, release: dict[str, Any], owner: dict[str, Any], token: str,
+    directory: Path,
+) -> None:
+    asset_id = owner.get("asset_id")
+    name = owner.get("asset_name")
+    digest = owner.get("sha256")
+    old = _asset(opener, release["id"], name, token)
+    if old is None:
+        return
+    if old.get("id") != asset_id:
+        raise PublishError("Previous asset ownership does not match its live identity.")
+    if old.get("digest") not in (None, f"sha256:{digest}"):
+        raise PublishError("Previous owned asset checksum has changed.")
+    status, content = _http(
+        opener, "GET",
+        f"{GITHUB_API}/repos/{REPOSITORY}/releases/assets/{asset_id}", token,
+        accept="application/octet-stream",
+    )
+    if status < 200 or status >= 300 or hashlib.sha256(content).hexdigest() != digest:
+        raise PublishError("Unable to back up and verify the previous owned APK.")
+    backup = directory / ".github-release-backup"
+    try:
+        backup.mkdir(exist_ok=True)
+        (backup / f"{asset_id}.apk").write_bytes(content)
+        (backup / f"{asset_id}.json").write_text(
+            json.dumps({"asset": old, "release": release}, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    except OSError as error:
+        raise PublishError("Unable to save the previous owned APK backup.") from error
+    status, _ = _http(
+        opener, "DELETE",
+        f"{GITHUB_API}/repos/{REPOSITORY}/releases/assets/{asset_id}", token,
+    )
+    if status < 200 or status >= 300:
+        raise PublishError(
+            f"New APK published, but previous owned APK cleanup failed (HTTP {status})."
+        )
 
 
 def _asset(
@@ -482,8 +562,9 @@ def publish(
             body={"name": label, "label": label},
         )
     _validate_uploaded_asset(opener, promoted, label, size, digest, token)
+    previous_assets = _previous_assets(previous, promoted["id"])
     title, notes, label = release_metadata(
-        env, version, code, digest, previous, promoted["id"]
+        env, version, code, digest, previous, promoted["id"], previous_assets,
     )
 
     published = _github_json(
@@ -507,6 +588,19 @@ def publish(
         token,
         body={"sha": env["CI_COMMIT_SHA"], "force": True},
     )
+
+    for owner in previous_assets:
+        _retire_previous_asset(opener, release, owner, token, directory)
+    if previous_assets:
+        _, cleaned_notes, _ = release_metadata(
+            env, version, code, digest, previous, promoted["id"]
+        )
+        cleaned = _github_json(
+            opener, "PATCH", f"/repos/{REPOSITORY}/releases/{release_id}", token,
+            body={"body": cleaned_notes},
+        )
+        if cleaned.get("body") != cleaned_notes:
+            raise PublishError("GitHub did not confirm completed managed asset cleanup.")
 
     print(
         f"Published {label} from pipeline {env['CI_PIPELINE_ID']} "

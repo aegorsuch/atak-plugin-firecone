@@ -32,6 +32,11 @@ publish_github_pipeline_release:
     - job: test_github_release_publisher
       artifacts: false
   resource_group: firecone-github-rolling-release
+  artifacts:
+    when: always
+    expire_in: 30 days
+    paths:
+      - .github-release-backup/
   script:
     - python3 scripts/publish_github_release.py
   rules:

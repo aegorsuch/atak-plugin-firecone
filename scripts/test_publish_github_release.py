@@ -49,6 +49,10 @@ class FakeGitHub:
         previous_body: str = "",
         versioned_asset: bool = False,
         versioned_digest: str = APK_DIGEST,
+        owned_asset: bool = False,
+        old_identity: int = 11,
+        corrupt_backup: bool = False,
+        fail_cleanup: bool = False,
     ):
         self.calls = []
         self.stable_asset = stable_asset
@@ -59,6 +63,10 @@ class FakeGitHub:
         self.previous_body = previous_body
         self.versioned_asset = versioned_asset
         self.versioned_digest = versioned_digest
+        self.owned_asset = owned_asset
+        self.old_identity = old_identity
+        self.corrupt_backup = corrupt_backup
+        self.fail_cleanup = fail_cleanup
 
     def __call__(self, request, timeout=60):
         url = urlsplit(request.full_url)
@@ -102,6 +110,12 @@ class FakeGitHub:
             )
         if path.endswith("/releases/7/assets") and method == "GET":
             assets = []
+            if self.owned_asset:
+                assets.append({
+                    "id": self.old_identity, "name": "Firecone-0.1-p6.apk",
+                    "size": len(APK_BYTES), "state": "uploaded",
+                    "digest": f"sha256:{APK_DIGEST}",
+                })
             if self.versioned_asset:
                 assets.append({
                     "id": 12, "name": "Firecone-0.1-p7.apk",
@@ -131,6 +145,8 @@ class FakeGitHub:
             if request.get_header("Accept") != "application/octet-stream":
                 raise AssertionError("APK content must be requested for digest fallback.")
             return Response(APK_BYTES)
+        if path.endswith("/assets/11") and method == "GET":
+            return Response(b"corrupt" if self.corrupt_backup else APK_BYTES)
         if "uploads.github.com" in request.full_url and method == "POST":
             if request.data != APK_BYTES:
                 raise AssertionError("The signed APK bytes must be preserved.")
@@ -165,12 +181,16 @@ class FakeGitHub:
                 }
             )
         if method == "PATCH" and path.endswith("/releases/7"):
+            if "name" not in body:
+                return Response({"id": 7, "body": body["body"]})
             return Response(
                 {"id": 7, "name": body["name"], "draft": False, "prerelease": False}
             )
         if method == "PATCH" and path.endswith("/git/refs/tags/pipeline-latest"):
             return Response({"ref": "refs/tags/pipeline-latest"})
         if method == "DELETE":
+            if self.fail_cleanup:
+                return Response({"message": "delete failed"}, 500)
             return Response(b"", 204)
         raise AssertionError(f"Unexpected request: {method} {request.full_url} {body}")
 
@@ -526,6 +546,68 @@ class PublishReleaseTests(unittest.TestCase):
         )
         self.assertEqual(len(calls), 2)
         self.assertIn("page=2", calls[1])
+
+    @staticmethod
+    def owned_previous_body():
+        return release_metadata(
+            environment(
+                CI_PIPELINE_ID="41", CI_PIPELINE_IID="6",
+                CI_PIPELINE_URL="https://git.tak.gov/aegorsuch/atak-plugin-firecone/-/pipelines/41",
+            ), "0.1", "122", APK_DIGEST, asset_id=11,
+        )[1]
+
+    def test_owned_previous_apk_is_backed_up_then_deleted_after_verified_publish(self):
+        github = FakeGitHub(owned_asset=True, previous_body=self.owned_previous_body())
+        self.assertTrue(publish(environment(), github, Path(self.temp_dir.name)))
+        deletes = [call for call in github.calls if call[0] == "DELETE"]
+        self.assertEqual([call[1] for call in deletes], [
+            "/repos/aegorsuch/atak-plugin-firecone/releases/assets/11"
+        ])
+        deleted_at = github.calls.index(deletes[0])
+        self.assertTrue(any(
+            call[0] == "PATCH" and "/git/refs/tags/" in call[1]
+            for call in github.calls[:deleted_at]
+        ))
+        backup = Path(self.temp_dir.name, ".github-release-backup")
+        self.assertEqual((backup / "11.apk").read_bytes(), APK_BYTES)
+        self.assertEqual(json.loads((backup / "11.json").read_text())["asset"]["id"], 11)
+        self.assertFalse(any(call[1].endswith("/assets/13") for call in github.calls))
+        updates = [c for c in github.calls if c[0] == "PATCH" and c[1].endswith("/releases/7")]
+        self.assertIn('"previous_assets"', updates[0][2]["body"])
+        self.assertNotIn('"previous_assets"', updates[-1][2]["body"])
+
+    def test_owned_asset_identity_mismatch_is_never_deleted(self):
+        github = FakeGitHub(
+            owned_asset=True, previous_body=self.owned_previous_body(), old_identity=99
+        )
+        with self.assertRaisesRegex(PublishError, "live identity"):
+            publish(environment(), github, Path(self.temp_dir.name))
+        self.assertFalse(any(call[0] == "DELETE" for call in github.calls))
+
+    def test_backup_checksum_failure_prevents_deletion(self):
+        github = FakeGitHub(
+            owned_asset=True, previous_body=self.owned_previous_body(), corrupt_backup=True
+        )
+        with self.assertRaisesRegex(PublishError, "back up and verify"):
+            publish(environment(), github, Path(self.temp_dir.name))
+        self.assertFalse(any(call[0] == "DELETE" for call in github.calls))
+
+    def test_cleanup_failure_keeps_claim_for_same_pipeline_retry(self):
+        github = FakeGitHub(
+            owned_asset=True, previous_body=self.owned_previous_body(), fail_cleanup=True
+        )
+        with self.assertRaisesRegex(PublishError, "cleanup failed"):
+            publish(environment(), github, Path(self.temp_dir.name))
+        pending = next(
+            c[2]["body"] for c in github.calls
+            if c[0] == "PATCH" and c[1].endswith("/releases/7")
+        )
+        retry = FakeGitHub(
+            owned_asset=True, versioned_asset=True, previous_body=pending
+        )
+        self.assertTrue(publish(environment(), retry, Path(self.temp_dir.name)))
+        self.assertTrue(any(c[0] == "DELETE" and c[1].endswith("/assets/11") for c in retry.calls))
+        self.assertFalse(any(c[0] == "POST" for c in retry.calls))
 
     def test_matching_versioned_asset_is_reused_without_upload_or_rename(self):
         github = FakeGitHub(versioned_asset=True)

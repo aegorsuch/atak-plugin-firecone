@@ -9,3 +9,4 @@ signing.properties
 commit.json
 *.apk
 __pycache__/
+.github-release-backup/
