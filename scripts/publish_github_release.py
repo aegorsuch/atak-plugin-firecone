@@ -18,7 +18,7 @@ from urllib.request import Request, urlopen
 
 REPOSITORY = "aegorsuch/atak-plugin-firecone"
 RELEASE_TAG = "pipeline-latest"
-RELEASE_TITLE = "TAK Forge Automated Pipeline"
+RELEASE_TITLE = "TAK.gov Forge CI/CD Pipeline Release"
 NOTES_START = "<!-- firecone-pipeline-release:start -->"
 NOTES_END = "<!-- firecone-pipeline-release:end -->"
 STABLE_ASSET_NAME = "ATAK-Plugin-Firecone-latest.apk"

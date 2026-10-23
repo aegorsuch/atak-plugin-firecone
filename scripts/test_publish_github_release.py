@@ -254,7 +254,7 @@ class PublishReleaseTests(unittest.TestCase):
             if call[0] == "PATCH" and call[1].endswith("/releases/7")
         )
         self.assertEqual(
-            update[2]["name"], "TAK Forge Automated Pipeline (Firecone 0.1, code 123)"
+            update[2]["name"], "TAK.gov Forge CI/CD Pipeline Release (Firecone 0.1, code 123)"
         )
         self.assertIn("project pipeline **7**", update[2]["body"])
         self.assertIn("Source commit: `" + "a" * 40 + "`", update[2]["body"])
@@ -403,7 +403,7 @@ class PublishReleaseTests(unittest.TestCase):
             if call[0] == "POST" and call[1].endswith("/releases")
         )
         self.assertEqual(
-            create[2]["name"], "TAK Forge Automated Pipeline (Firecone 0.1, code 123)"
+            create[2]["name"], "TAK.gov Forge CI/CD Pipeline Release (Firecone 0.1, code 123)"
         )
         self.assertEqual(create[2]["tag_name"], "pipeline-latest")
         self.assertTrue(create[2]["draft"])

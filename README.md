@@ -45,7 +45,7 @@ GitHub backup after a successful protected `main` build.
 ## Rolling GitHub release
 
 The protected `main` pipeline publishes only its signed CIV APK to the
-public GitHub backup as the stable release **TAK Forge Automated Pipeline
+public GitHub backup as the stable release **TAK.gov Forge CI/CD Pipeline Release
 (Firecone <plugin-version>, code <versionCode>)**
 (`pipeline-latest`) with the asset `ATAK-Plugin-Firecone-latest.apk`. The
 publisher verifies the APK signature and the uploaded asset digest, serializes
