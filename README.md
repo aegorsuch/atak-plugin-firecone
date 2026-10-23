@@ -54,7 +54,7 @@ or unrelated release assets. Version and code come from the signed APK using
 `aapt dump badging`, not from the filename or current checkout. Notes include
 the full embedded version, channel, global pipeline ID and project IID (when
 available), canonical pipeline URL, exact source SHA, separate SHA256, and a
-readable download link and native asset label matching the APK filename without
+native asset label matching the APK filename without
 hashes. If no project IID is available, `-code<versionCode>` replaces `-p<IID>`;
 an already matching pipeline suffix is not duplicated. Hidden managed boundaries
 and pipeline metadata allow repeat updates while preserving manual notes.
@@ -65,6 +65,9 @@ are retained without renaming, replacement or cosmetic deletion. Versioned
 download URLs are immutable: retries reuse identical verified bytes and fail
 on a conflicting digest. The managed marker records the current asset ID/name;
 manual/unowned assets are never cleaned up based on filename patterns.
+Visible notes follow the WearOS release template exactly: a stable product and
+truthful branch-channel introduction, five provenance bullets, then the install
+and fixed-anchor source-archive explanation. There is no extra download link.
 
 Before enabling this publisher, configure a `GITHUB_RELEASE_TOKEN` CI/CD
 variable in the canonical TAK Forge project. Use a fine-grained token limited
